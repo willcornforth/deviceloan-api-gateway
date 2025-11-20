@@ -1,37 +1,53 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { AuthMiddleware, AuthenticatedRequest } from '../infra/middleware';
+import { OAuth2Validator } from '../infra/oauth2-validator';
 
-const authMiddleware = new AuthMiddleware();
+// Initialize OAuth2 validator with Auth0 configuration
+const oauth2Validator = new OAuth2Validator({
+	jwksUri: `https://${process.env.AUTH0_DOMAIN}/.well-known/jwks.json`,
+	issuer: `https://${process.env.AUTH0_DOMAIN}/`,
+	audience: process.env.AUTH0_AUDIENCE || '',
+});
 
 export async function getProducts(
 	request: HttpRequest,
 	context: InvocationContext
 ): Promise<HttpResponseInit> {
-	// Authenticate the request
-	const authResult = await authMiddleware.authenticate(request as AuthenticatedRequest, context);
-	if (authResult) {
-		return authResult; // Return 401 if authentication fails
+	// Validate the OAuth2 token
+	const authContext = await oauth2Validator.validate(request);
+
+	// Check if user is authenticated
+	if (!authContext.authenticated) {
+		context.log('Authentication failed - no valid token provided');
+		return {
+			status: 401,
+			jsonBody: {
+				error: 'Unauthorized',
+				message: 'Invalid or missing authentication token'
+			}
+		};
 	}
 
-	// Optional: Check for specific permissions
-	const authzResult = await authMiddleware.authorize(
-		request as AuthenticatedRequest,
-		context,
-		['read:products'] // Required permissions
-	);
-	if (authzResult) {
-		return authzResult; // Return 403 if authorization fails
+	// Check for required scope
+	if (!oauth2Validator.hasScope(authContext, 'read:products')) {
+		context.log(`User ${authContext.subject} lacks required scope: read:products`);
+		return {
+			status: 403,
+			jsonBody: {
+				error: 'Forbidden',
+				message: 'Insufficient permissions to access this resource'
+			}
+		};
 	}
 
-	// Your business logic here
-	const authenticatedRequest = request as AuthenticatedRequest;
-	context.log(`User ${authenticatedRequest.authUser?.sub} is accessing GET products`);
+	// Business logic - user is authenticated and authorized
+	context.log(`User ${authContext.subject} is accessing GET products`);
 
 	return {
 		status: 200,
 		jsonBody: {
 			message: 'Products retrieved successfully',
-			data: [] // Your product data
+			user: authContext.subject,
+			data: [] // Your product data here
 		}
 	};
 }
