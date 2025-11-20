@@ -25,7 +25,7 @@ export async function getProducts(
 
 	// Your business logic here
 	const authenticatedRequest = request as AuthenticatedRequest;
-	context.log(`User ${authenticatedRequest.authUser?.sub} is accessing products`);
+	context.log(`User ${authenticatedRequest.authUser?.sub} is accessing GET products`);
 
 	return {
 		status: 200,
